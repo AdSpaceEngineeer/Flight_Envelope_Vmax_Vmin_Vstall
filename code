@@ -1,0 +1,97 @@
+#This code generates the flight envelope by computing Vmin, Vstall and Vmax of an aircraft
+
+#import packages
+import math as m
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+
+#custom function to get P, T, rho given h in Earth standard dry air atmosphere model
+
+g0 = 32.174         # feet per square seconds, std grav acceleration
+R = 1716.5          # feet square per second square per deg Rankine, specific gas constant of air
+F_to_R = 459.67     # to convert deg Fahrenheit to deg Rankine, R = F + 459.67
+a = -0.00357        # deg Rankine per feet, environmental lapse rate
+P_sl = 2116.22      # pounds per square feet, pressure at sea level
+rho_sl = 2.3769e-3  # slugs per cubic feet, density at sea level
+T_sl = 59           # deg Fahrenheit, Temperature at sea level
+T_trop = -69.7      # deg Fahrenheit, Temperature at 36000 feet
+P_trop = 474.59       # pounds per square feet, pressure at 36000 feet
+rho_trop = 7.0864e-4  # slugs per cubic feet, density at 36000 feet
+
+def get_PTrho_given_altitude(h,g0,R,P_sl,rho_sl,F_to_R,a,T_sl,T_trop,P_trop,rho_trop):
+    if h < 36000 :
+        T1 = T_sl + F_to_R                     # deg Rankine, Temperature at sea level
+        T = T1 + a*h                         # deg Rankine, Temperature at h
+        P = P_sl * ( T / T1 )**(-1*g0/(R*a))              # pounds per square feet, Pressure at h
+        rho = rho_sl * ( T / T1 )**(-1*(g0/(R*a) + 1))    # slug per cubic fe   et, Density at h
+    
+    elif h >= 36000 and h < 82000 :          # isotherml region of stratosphere
+        h0 = 36000                           # feet, altitude at tropopause
+        T = T_trop + F_to_R                   # deg Rankine, Temperature at 36000 feet
+        P = P_trop * m.e**(-1*g0*(h - h0)/(R*T))        # pounds per square feet, Pressure at h
+        rho = rho_trop * m.e**(-1*g0*(h - h0)/(R*T))    # slug per feet cube, Density at h
+    
+    return [P, T - F_to_R, rho]     #return Pressure in lb/ft2, Temperature in degF and Density in slugs/ft3
+
+# Aicraft's Constants, Parameters and Equations
+# Assume CD = CD0 + k*CL^2
+
+engine_num = 2  # number of engines
+CD0 = 0.0179    # parasite drag coefficient
+k = 0.0427      # 1/(e0*pi*AR) constant
+S = 1341        # ft.s-2, planform area of aircraft
+
+# altitudes
+h_list = [h for h in range(0,50001,5000)]
+# thrust available per engine corresponding to altitudes 'h'
+T_list = [17233, 16003, 14721, 13440, 11830, 10259, 8668, 7127, 5705, 4193, 3146]
+
+
+# Assuming steady levelled flight conditions
+# L = W
+# Assume Thrust constant wrt Speed
+# Assume T_avail = 17507 - 0.2918 * h ; in lbf (or slug.ft.s-2)
+W = 140000      # lb, weight of aircraft, assumed constant
+CLmax = 1.8     # maximum lift coefficient
+
+# computing V_min (or V_stall > V_min) and V_max given h
+V_max_list = []
+V_min_list = []
+V_stall_list = []
+
+#generate Vmin and Vmax at each h
+for h in h_list:    # h_list must be in ascending order to implement the 'break' function in this for loop
+    rho_slug = get_PTrho_given_altitude(h,g0,R,P_sl,rho_sl,F_to_R,a,T_sl,T_trop,P_trop,rho_trop)[2]
+    A = 0.5 * rho_slug * S * CD0
+    B = 2 * k * W**2 / (rho_slug * S)
+    Ta = engine_num * (17507 - 0.2918 * h)
+    if (Ta**2 - 4*A*B) < 0: print("\nAltitude ", h," feet is outside Flight Performance Envelope"); break
+    V_max = ( ( Ta + (Ta**2 - 4*A*B)**0.5 ) / (2*A) )**0.5
+    V_min = ( ( Ta - (Ta**2 - 4*A*B)**0.5 ) / (2*A) )**0.5
+    V_stall = ( (2*W)/(rho_slug*S*CLmax) )**0.5
+    V_stall_list.append(V_stall)
+    if V_stall > V_min: V_min = V_stall; print("V_stall is V_min for altitude ", h, " feet.")
+    V_max_list.append(V_max)
+    V_min_list.append(V_min)
+
+#print results
+print("\n")
+print("Dataset of Boeing 737-700 Max and Min Airspeeds at SLUF condition")
+print(pd.DataFrame({"h/ft" : h_list[:len(V_max_list)], "V_max/ft.s-1": V_max_list, "V_min/ft.s-1": V_min_list, "V_stall/ft.s-1": V_stall_list}))
+
+
+#create Flight Performance Envelope plot
+plt.figure(figsize=(8, 8))
+y = h_list[:len(V_max_list)]
+plt.plot(V_min_list, y, color = 'red', label = 'Min Speeds')
+plt.plot(V_max_list, y, color = 'blue', label = 'Max Speeds')
+plt.xlabel("Airspeed / ft.s-1")
+plt.ylabel("Altitude / ft")
+plt.title("Flight Performance Envelope for B737-700", fontsize = 14)
+plt.legend(fontsize = 10, bbox_to_anchor=(1, 1))
+plt.ylim(0, 60000)
+plt.yticks(range(0,60000,5000))
+plt.grid(axis = 'y')
+plt.show()
+
